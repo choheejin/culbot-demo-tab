@@ -137,7 +137,8 @@ if __name__ == "__main__":
     df2 = pd.read_json('./data_cbnu_embedding2.json')
     df2.rename(columns={'instruction': 'question', 'output':'answer'}, inplace=True)
 
-    OPENAI_API_KEY = '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'
+    # 동작가능한 api key 첨부 필요
+    OPENAI_API_KEY = 'sk-...'
     openai.api_key = OPENAI_API_KEY
     
     embedding_function = OpenAIEmbeddingFunction(api_key=OPENAI_API_KEY, model_name='text-embedding-ada-002')
