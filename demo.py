@@ -9,8 +9,12 @@ import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 import openai
 
+import random
+import json
 import gradio as gr
 import time
+
+from konlpy.tag import Okt
 
 def query_collection(collection, query, max_results, dataframe):
     results = collection.query(query_texts=query, n_results=max_results, include=['distances']) 
@@ -55,6 +59,7 @@ def respond1(
 
     return "", chat_history
 
+## 병원
 def respond2(
     message,
     chat_history,
@@ -67,18 +72,59 @@ def respond2(
         s = output[0]["generated_text"]
         result = prompter.get_response(s)
         return result
-    
-    query_result = query_collection(
+        
+    json_file_path = './question_synonym.json'
+    with open(json_file_path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+        
+    query_result1 = query_collection(
             collection=medical_question_collection,
             query=message,
-            max_results=3,
+            max_results=2,
             dataframe=df
-        )
+    )
+
+    print(query_result1)
+    sorted_df = query_result1.sort_values(by='score', ascending=False).reset_index(drop=True)
+    print(sorted_df)
+
+    nouns = okt.nouns(message)
+    sentence = message
+    
+    for noun in nouns:
+        item = {}
+        for idx, obj in enumerate(data):
+            if(noun in obj['question_nouns_synonym']):
+                item[noun] = obj['question_nouns']
+        print(item)
+        
+        if noun in item:
+            synonyms = item[noun]
+            print(synonyms)
+            if synonyms:
+                sentence = sentence.replace(noun, synonyms)
+                print(sentence)
+
+    query_result2 = query_collection(
+            collection=medical_question_collection,
+            query=sentence,
+            max_results=2,
+            dataframe=df
+    )
+    
+    print(sentence)
+    
     qa_set = ''
-    question_list = query_result.question
-    answer_list = query_result.answer
+    question_list = query_result1.question
+    answer_list = query_result1.answer
     for q, a  in zip(question_list,answer_list):
         qa_set += "question: {} answer: {} /n".format(q,a)
+
+    question_list = query_result2.question
+    answer_list = query_result2.answer
+    for q, a  in zip(question_list,answer_list):
+        qa_set += "question: {} answer: {} /n".format(q,a)
+        
     print(qa_set)
 
     bot_message = gen(instruction=message, input_text=qa_set)
@@ -128,6 +174,8 @@ with gr.Blocks(title="Culbot") as demo:
 if __name__ == "__main__":
     gc.collect()
     torch.cuda.empty_cache()
+    
+    okt=Okt()
 
     chroma_client = chromadb.Client()
 
@@ -138,7 +186,7 @@ if __name__ == "__main__":
     df2.rename(columns={'instruction': 'question', 'output':'answer'}, inplace=True)
 
     # 동작가능한 api key 첨부 필요
-    OPENAI_API_KEY = 'sk-...'
+    OPENAI_API_KEY = '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'
     openai.api_key = OPENAI_API_KEY
     
     embedding_function = OpenAIEmbeddingFunction(api_key=OPENAI_API_KEY, model_name='text-embedding-ada-002')
