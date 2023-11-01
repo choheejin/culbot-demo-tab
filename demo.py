@@ -14,7 +14,112 @@ import json
 import gradio as gr
 import time
 
+import threading
+
 from konlpy.tag import Okt
+
+condition_event = threading.Event()
+
+class MyThread1(threading.Thread):
+    def __init__(self, arg1, arg2, arg3):
+        super().__init__()
+        self.arg1 = arg1
+        self.arg2 = arg2
+        self.arg3 = arg3
+        self.result = None
+
+    def run(self):
+        # 스레드에서 실행될 코드
+        self.result = thread1_function(self.arg1, self.arg2, self.arg3)
+
+    def get_result(self):
+        return self.result
+
+class MyThread2(threading.Thread):
+    def __init__(self, arg1, arg2, arg3):
+        super().__init__()
+        self.arg1 = arg1
+        self.arg2 = arg2
+        self.arg3 = arg3
+        self.result = None
+
+    def run(self):
+        # 스레드에서 실행될 코드
+        self.result = thread2_function(self.arg1, self.arg2, self.arg3)
+
+    def get_result(self):
+        return self.result
+
+def respond(
+    message,
+    chat_history,
+):
+    if("충북대" in message):
+        return respond1(message, chat_history)
+    else:
+        return respond2(message, chat_history)
+
+
+def thread1_function(medical_question_collection, message, data):
+    nouns = okt.nouns(message)
+    sentence = message
+    
+    for noun in nouns:
+        item = {}
+        for idx, obj in enumerate(data):
+            if(noun in obj['question_nouns_synonym']):
+                item[noun] = obj['question_nouns']
+        print(item)
+        
+        if noun in item:
+            synonyms = item[noun]
+            print(synonyms)
+            if synonyms:
+                sentence = sentence.replace(noun, synonyms)
+                print(sentence)
+    
+    qa_set = ''
+
+    if(message == sentence):
+        print("1번 쓰레드: 조건 A를 만족하지 못했습니다. 중단합니다.")
+        return qa_set
+
+    query_result2 = query_collection(
+            collection=medical_question_collection,
+            query=sentence,
+            max_results=3,
+            dataframe=df
+    )
+    
+    question_list = query_result2.question
+    answer_list = query_result2.answer
+    for q, a  in zip(question_list,answer_list):
+        qa_set += "{} {} /n".format(q,a)
+    
+    print(sentence)
+    print("1번 쓰레드: 조건 A를 만족했습니다.")
+    condition_event.set()
+    return qa_set
+
+def thread2_function(medical_question_collection, message, data):
+    print("2번 쓰레드: 시작")
+    
+    query_result = query_collection(
+            collection=medical_question_collection,
+            query=message,
+            max_results=3,
+            dataframe=df
+    )
+
+    question_list = query_result.question
+    answer_list = query_result.answer
+    qa_set = ''
+    for q, a  in zip(question_list,answer_list):
+        qa_set += "{} {} /n".format(q,a)
+
+    print("2번 쓰레드: 끝")
+    condition_event.set()
+    return qa_set
 
 def query_collection(collection, query, max_results, dataframe):
     results = collection.query(query_texts=query, n_results=max_results, include=['distances']) 
@@ -49,7 +154,7 @@ def respond1(
     question_list = query_result.question
     answer_list = query_result.answer
     for q, a  in zip(question_list,answer_list):
-        qa_set += "question: {} answer: {} /n".format(q,a)
+        qa_set += "{} {} /n".format(q,a)
     print(qa_set)
 
     bot_message = gen(instruction=message, input_text=qa_set)
@@ -76,100 +181,53 @@ def respond2(
     json_file_path = './question_synonym.json'
     with open(json_file_path, "r", encoding="utf-8") as file:
         data = json.load(file)
-        
-    query_result1 = query_collection(
-            collection=medical_question_collection,
-            query=message,
-            max_results=2,
-            dataframe=df
-    )
-
-    print(query_result1)
-    sorted_df = query_result1.sort_values(by='score', ascending=False).reset_index(drop=True)
-    print(sorted_df)
-
-    nouns = okt.nouns(message)
-    sentence = message
     
-    for noun in nouns:
-        item = {}
-        for idx, obj in enumerate(data):
-            if(noun in obj['question_nouns_synonym']):
-                item[noun] = obj['question_nouns']
-        print(item)
-        
-        if noun in item:
-            synonyms = item[noun]
-            print(synonyms)
-            if synonyms:
-                sentence = sentence.replace(noun, synonyms)
-                print(sentence)
-
-    query_result2 = query_collection(
-            collection=medical_question_collection,
-            query=sentence,
-            max_results=2,
-            dataframe=df
-    )
+    # 스레드 생성
+    t1 = MyThread1(medical_question_collection, message, data)
+    t2 = MyThread2(medical_question_collection, message, data)
     
-    print(sentence)
+    # 스레드 실행
+    t1.start()
+    t2.start()
     
-    qa_set = ''
-    question_list = query_result1.question
-    answer_list = query_result1.answer
-    for q, a  in zip(question_list,answer_list):
-        qa_set += "question: {} answer: {} /n".format(q,a)
+    # 스레드가 종료될 때까지 대기
+    t1.join()
+    t2.join()
+    
+    # 스레드 결과 값 출력
+    print("Thread 1 result:", t1.get_result())
+    print("Thread 2 result:", t2.get_result())
 
-    question_list = query_result2.question
-    answer_list = query_result2.answer
-    for q, a  in zip(question_list,answer_list):
-        qa_set += "question: {} answer: {} /n".format(q,a)
-        
-    print(qa_set)
-
-    bot_message = gen(instruction=message, input_text=qa_set)
-    print(bot_message)
-    chat_history.append((message, bot_message))
-    time.sleep(0.5)
+    if(t1.get_result() != ''):
+        bot_message = gen(instruction=message, input_text=t1.get_result())
+        print(bot_message)
+        chat_history.append((message, bot_message))
+    else:
+        bot_message = gen(instruction=message, input_text=t2.get_result())
+        print(bot_message)
+        chat_history.append((message, bot_message))
 
     return "", chat_history
 
 
 with gr.Blocks(title="Culbot") as demo:
     gr.Markdown("### Culbot")
-    with gr.Tab("충북대 관련 질문"):
-        chatbot = gr.Chatbot().style(height=550)
-        with gr.Row():
-            with gr.Column(scale=9):
-                # 입력
-                msg = gr.Textbox(
-                    show_label=False,
-                    placeholder="Enter text and press enter",
-                ).style(container=False)
-            with gr.Column(scale=1):
-                # 버튼
-                clear = gr.Button("➤")
-        # 버튼 클릭
-        clear.click(respond1, [msg, chatbot], [msg, chatbot])
-        # 엔터키
-        msg.submit(respond1, [msg, chatbot], [msg,chatbot])
-    
-    with gr.Tab("질병 관련 질문"):
-        chatbot = gr.Chatbot().style(height=550)
-        with gr.Row():
-            with gr.Column(scale=9):
-                # 입력
-                msg = gr.Textbox(
-                    show_label=False,
-                    placeholder="Enter text and press enter",
-                ).style(container=False)
-            with gr.Column(scale=1):
-                # 버튼
-                clear = gr.Button("➤")
-        # 버튼 클릭
-        clear.click(respond2, [msg, chatbot], [msg, chatbot], "medical")
-        # 엔터키
-        msg.submit(respond2, [msg, chatbot], [msg,chatbot], "medical")    
+    chatbot = gr.Chatbot(height=550)
+    with gr.Row():
+        with gr.Column(scale=9):
+            # 입력
+            msg = gr.Textbox(
+                container=False,
+                show_label=False,
+                placeholder="Enter text and press enter",
+            )
+        with gr.Column(scale=1):
+            # 버튼
+            clear = gr.Button("➤")
+    # 버튼 클릭
+    clear.click(respond, [msg, chatbot], [msg, chatbot], "medical")
+    # 엔터키
+    msg.submit(respond, [msg, chatbot], [msg,chatbot], "medical")    
 
 if __name__ == "__main__":
     gc.collect()
@@ -186,7 +244,7 @@ if __name__ == "__main__":
     df2.rename(columns={'instruction': 'question', 'output':'answer'}, inplace=True)
 
     # 동작가능한 api key 첨부 필요
-    OPENAI_API_KEY = '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'
+    OPENAI_API_KEY = 'sk-..'
     openai.api_key = OPENAI_API_KEY
     
     embedding_function = OpenAIEmbeddingFunction(api_key=OPENAI_API_KEY, model_name='text-embedding-ada-002')
