@@ -56,9 +56,10 @@ def respond(
 ):
     if("충북대" in message):
         return respond1(message, chat_history)
-    else:
+    elif("건강" in message):
         return respond2(message, chat_history)
-
+    else:
+        return respond3(message, chat_history)
 
 def thread1_function(medical_question_collection, message, data):
     nouns = okt.nouns(message)
@@ -207,6 +208,26 @@ def respond2(
         print(bot_message)
         chat_history.append((message, bot_message))
 
+    return "", chat_history
+
+def respond3(
+        message,
+        chat_history,
+):
+    def gen(instruction="", input_text=""):
+        gc.collect()
+        torch.cuda.empty_cache()
+        prompt = prompter.generate_prompt(instruction, input_text)
+        output = pipe(prompt, max_length=1024, temperature=0.2, num_beams=5, eos_token_id=2)
+        s = output[0]["generated_text"]
+        result = prompter.get_response(s)
+        return result
+
+
+    bot_message = gen(input_text=message)
+    print(bot_message)
+    chat_history.append((message, bot_message))
+    time.sleep(0.5)
     return "", chat_history
 
 
